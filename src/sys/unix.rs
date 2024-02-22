@@ -45,8 +45,14 @@ use std::num::NonZeroU32;
 ))]
 use std::num::NonZeroUsize;
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, IntoRawFd, OwnedFd, RawFd};
+#[cfg(target_os = "hermit")]
+use std::os::hermit::ffi::OsStrExt;
+#[cfg(target_os = "hermit")]
+use std::os::hermit::io::RawFd;
+#[cfg(target_os = "hermit")]
+use std::os::hermit::io::{AsFd, AsRawFd, BorrowedFd, FromRawFd, IntoRawFd, OwnedFd};
 use std::os::unix::ffi::OsStrExt;
-#[cfg(feature = "all")]
+#[cfg(all(feature = "all", not(target_os = "hermit")))]
 use std::os::unix::net::{UnixDatagram, UnixListener, UnixStream};
 use std::path::Path;
 use std::ptr;
@@ -60,24 +66,34 @@ use std::{io, slice};
     target_os = "tvos",
     target_os = "watchos",
     target_os = "cygwin",
+    target_os = "hermit",
 )))]
 use libc::ssize_t;
+#[allow(non_camel_case_types)]
+#[cfg(target_os = "hermit")]
+type ssize_t = isize;
 use libc::{in6_addr, in_addr};
 
 use crate::{Domain, Protocol, SockAddr, SockAddrStorage, TcpKeepalive, Type};
-#[cfg(not(target_os = "redox"))]
+#[cfg(not(any(target_os = "redox", target_os = "hermit")))]
 use crate::{MsgHdr, MsgHdrMut, RecvFlags};
 
 pub(crate) use std::ffi::c_int;
 
 // Used in `Domain`.
+#[cfg(target_os = "hermit")]
+pub(crate) use libc::{AF_INET, AF_INET6};
+#[cfg(unix)]
 pub(crate) use libc::{AF_INET, AF_INET6, AF_UNIX};
 // Used in `Type`.
 #[cfg(all(feature = "all", target_os = "linux"))]
 pub(crate) use libc::SOCK_DCCP;
-#[cfg(all(feature = "all", not(any(target_os = "redox", target_os = "espidf"))))]
+#[cfg(all(
+    feature = "all",
+    not(any(target_os = "redox", target_os = "hermit", target_os = "espidf"))
+))]
 pub(crate) use libc::SOCK_RAW;
-#[cfg(all(feature = "all", not(target_os = "espidf")))]
+#[cfg(all(feature = "all", not(any(target_os = "espidf", target_os = "hermit"))))]
 pub(crate) use libc::SOCK_SEQPACKET;
 pub(crate) use libc::{SOCK_DGRAM, SOCK_STREAM};
 // Used in `Protocol`.
@@ -97,7 +113,9 @@ pub(crate) use libc::IPPROTO_SCTP;
     )
 ))]
 pub(crate) use libc::IPPROTO_UDPLITE;
-pub(crate) use libc::{IPPROTO_ICMP, IPPROTO_ICMPV6, IPPROTO_TCP, IPPROTO_UDP};
+#[cfg(unix)]
+pub(crate) use libc::{IPPROTO_ICMP, IPPROTO_ICMPV6};
+pub(crate) use libc::{IPPROTO_TCP, IPPROTO_UDP};
 // Used in `SockAddr`.
 #[cfg(all(feature = "all", any(target_os = "freebsd", target_os = "openbsd")))]
 pub(crate) use libc::IPPROTO_DIVERT;
@@ -105,9 +123,9 @@ pub(crate) use libc::{
     sa_family_t, sockaddr, sockaddr_in, sockaddr_in6, sockaddr_storage, socklen_t,
 };
 // Used in `RecvFlags`.
-#[cfg(not(any(target_os = "redox", target_os = "espidf")))]
+#[cfg(not(any(target_os = "redox", target_os = "hermit", target_os = "espidf")))]
 pub(crate) use libc::MSG_TRUNC;
-#[cfg(not(target_os = "redox"))]
+#[cfg(not(any(target_os = "redox", target_os = "hermit")))]
 pub(crate) use libc::SO_OOBINLINE;
 // Used in `Socket`.
 #[cfg(not(target_os = "nto"))]
@@ -124,6 +142,7 @@ pub(crate) use libc::IPV6_HDRINCL;
         target_os = "netbsd",
         target_os = "openbsd",
         target_os = "redox",
+        target_os = "hermit",
         target_os = "solaris",
         target_os = "haiku",
         target_os = "espidf",
@@ -144,9 +163,13 @@ pub(crate) use libc::IPV6_RECVHOPLIMIT;
     target_os = "haiku",
     target_os = "espidf",
     target_os = "vita",
+    target_os = "hermit",
 )))]
 pub(crate) use libc::IPV6_RECVTCLASS;
-#[cfg(all(feature = "all", not(any(target_os = "redox", target_os = "espidf"))))]
+#[cfg(all(
+    feature = "all",
+    not(any(target_os = "redox", target_os = "hermit", target_os = "espidf"))
+))]
 pub(crate) use libc::IP_HDRINCL;
 #[cfg(not(any(
     target_os = "aix",
@@ -163,6 +186,7 @@ pub(crate) use libc::IP_HDRINCL;
     target_os = "espidf",
     target_os = "vita",
     target_os = "cygwin",
+    target_os = "hermit",
 )))]
 pub(crate) use libc::IP_RECVTOS;
 #[cfg(not(any(
@@ -197,11 +221,9 @@ pub(crate) use libc::SO_PASSCRED;
 ))]
 pub(crate) use libc::SO_PRIORITY;
 pub(crate) use libc::{
-    ip_mreq as IpMreq, linger, IPPROTO_IP, IPPROTO_IPV6, IPV6_MULTICAST_HOPS, IPV6_MULTICAST_IF,
-    IPV6_MULTICAST_LOOP, IPV6_UNICAST_HOPS, IPV6_V6ONLY, IP_ADD_MEMBERSHIP, IP_DROP_MEMBERSHIP,
-    IP_MULTICAST_IF, IP_MULTICAST_LOOP, IP_MULTICAST_TTL, IP_TTL, MSG_OOB, MSG_PEEK, SOL_SOCKET,
-    SO_BROADCAST, SO_ERROR, SO_KEEPALIVE, SO_RCVBUF, SO_RCVTIMEO, SO_REUSEADDR, SO_SNDBUF,
-    SO_SNDTIMEO, SO_TYPE, TCP_NODELAY,
+    ip_mreq as IpMreq, IPV6_MULTICAST_HOPS, IPV6_MULTICAST_IF, IPV6_MULTICAST_LOOP,
+    IPV6_UNICAST_HOPS, IPV6_V6ONLY, IP_ADD_MEMBERSHIP, IP_DROP_MEMBERSHIP, IP_MULTICAST_IF,
+    IP_MULTICAST_LOOP, IP_MULTICAST_TTL, IP_TTL, MSG_OOB, SO_TYPE,
 };
 #[cfg(not(any(
     target_os = "dragonfly",
@@ -214,9 +236,15 @@ pub(crate) use libc::{
     target_os = "nto",
     target_os = "espidf",
     target_os = "vita",
+    target_os = "hermit",
 )))]
 pub(crate) use libc::{
     ip_mreq_source as IpMreqSource, IP_ADD_SOURCE_MEMBERSHIP, IP_DROP_SOURCE_MEMBERSHIP,
+};
+pub(crate) use libc::{linger, IPPROTO_IP, SO_KEEPALIVE, SO_RCVBUF, SO_RCVTIMEO, SO_SNDBUF};
+pub(crate) use libc::{
+    IPPROTO_IPV6, MSG_PEEK, SOL_SOCKET, SO_BROADCAST, SO_ERROR, SO_REUSEADDR, SO_SNDTIMEO,
+    TCP_NODELAY,
 };
 #[cfg(not(any(
     target_os = "dragonfly",
@@ -293,6 +321,7 @@ use libc::TCP_KEEPALIVE as KEEPALIVE_TIME;
     target_os = "tvos",
     target_os = "watchos",
     target_os = "vita",
+    target_os = "hermit",
 )))]
 use libc::TCP_KEEPIDLE as KEEPALIVE_TIME;
 
@@ -300,7 +329,35 @@ use libc::TCP_KEEPIDLE as KEEPALIVE_TIME;
 macro_rules! syscall {
     ($fn: ident ( $($arg: expr),* $(,)* ) ) => {{
         #[allow(unused_unsafe)]
+        #[cfg(target_os = "hermit")]
+        let res = unsafe { i32::try_from(libc::$fn($($arg, )*)).unwrap() };
+        #[cfg(target_os = "hermit")]
+        if res < 0 {
+            let e = match -res {
+                libc::errno::EACCES => std::io::ErrorKind::PermissionDenied,
+                libc::errno::EADDRINUSE => std::io::ErrorKind::AddrInUse,
+                libc::errno::EADDRNOTAVAIL => std::io::ErrorKind::AddrNotAvailable,
+                libc::errno::EAGAIN => std::io::ErrorKind::WouldBlock,
+                libc::errno::ECONNABORTED => std::io::ErrorKind::ConnectionAborted,
+                libc::errno::ECONNREFUSED => std::io::ErrorKind::ConnectionRefused,
+                libc::errno::ECONNRESET => std::io::ErrorKind::ConnectionReset,
+                libc::errno::EEXIST => std::io::ErrorKind::AlreadyExists,
+                libc::errno::EINTR => std::io::ErrorKind::Interrupted,
+                libc::errno::EINVAL => std::io::ErrorKind::InvalidInput,
+                libc::errno::ENOENT => std::io::ErrorKind::NotFound,
+                libc::errno::ENOTCONN => std::io::ErrorKind::NotConnected,
+                libc::errno::EPERM => std::io::ErrorKind::PermissionDenied,
+                libc::errno::EPIPE => std::io::ErrorKind::BrokenPipe,
+                libc::errno::ETIMEDOUT => std::io::ErrorKind::TimedOut,
+                _ => panic!("Unknown error {}", res),
+            };
+            Err(std::io::Error::from(e))
+        } else {
+            Ok(res)
+        }
+        #[cfg(unix)]
         let res = unsafe { libc::$fn($($arg, )*) };
+        #[cfg(unix)]
         if res == -1 {
             Err(std::io::Error::last_os_error())
         } else {
@@ -403,11 +460,13 @@ impl_debug!(
     Domain,
     libc::AF_INET,
     libc::AF_INET6,
+    #[cfg(not(target_os = "hermit"))]
     libc::AF_UNIX,
     #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
     libc::AF_PACKET,
     #[cfg(any(target_os = "android", target_os = "linux"))]
     libc::AF_VSOCK,
+    #[cfg(not(target_os = "hermit"))]
     libc::AF_UNSPEC, // = 0.
 );
 
@@ -479,11 +538,16 @@ impl_debug!(
     libc::SOCK_DGRAM,
     #[cfg(all(feature = "all", target_os = "linux"))]
     libc::SOCK_DCCP,
-    #[cfg(not(any(target_os = "redox", target_os = "espidf")))]
+    #[cfg(not(any(target_os = "redox", target_os = "hermit", target_os = "espidf")))]
     libc::SOCK_RAW,
-    #[cfg(not(any(target_os = "redox", target_os = "haiku", target_os = "espidf")))]
+    #[cfg(not(any(
+        target_os = "redox",
+        target_os = "hermit",
+        target_os = "haiku",
+        target_os = "espidf"
+    )))]
     libc::SOCK_RDM,
-    #[cfg(not(target_os = "espidf"))]
+    #[cfg(not(any(target_os = "espidf", target_os = "hermit")))]
     libc::SOCK_SEQPACKET,
     /* TODO: add these optional bit OR-ed flags:
     #[cfg(any(
@@ -511,7 +575,9 @@ impl_debug!(
 
 impl_debug!(
     Protocol,
+    #[cfg(not(target_os = "hermit"))]
     libc::IPPROTO_ICMP,
+    #[cfg(not(target_os = "hermit"))]
     libc::IPPROTO_ICMPV6,
     libc::IPPROTO_TCP,
     libc::IPPROTO_UDP,
@@ -536,7 +602,7 @@ impl_debug!(
 );
 
 /// Unix-only API.
-#[cfg(not(target_os = "redox"))]
+#[cfg(not(any(target_os = "redox", target_os = "hermit")))]
 impl RecvFlags {
     /// Check if the message terminates a record.
     ///
@@ -589,7 +655,7 @@ impl RecvFlags {
     }
 }
 
-#[cfg(not(target_os = "redox"))]
+#[cfg(not(any(target_os = "redox", target_os = "hermit")))]
 impl std::fmt::Debug for RecvFlags {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut s = f.debug_struct("RecvFlags");
@@ -610,15 +676,19 @@ impl std::fmt::Debug for RecvFlags {
 }
 
 #[repr(transparent)]
+#[cfg(not(target_os = "hermit"))]
 pub struct MaybeUninitSlice<'a> {
     vec: libc::iovec,
     _lifetime: PhantomData<&'a mut [MaybeUninit<u8>]>,
 }
 
+#[cfg(not(target_os = "hermit"))]
 unsafe impl<'a> Send for MaybeUninitSlice<'a> {}
 
+#[cfg(not(target_os = "hermit"))]
 unsafe impl<'a> Sync for MaybeUninitSlice<'a> {}
 
+#[cfg(not(target_os = "hermit"))]
 impl<'a> MaybeUninitSlice<'a> {
     pub(crate) fn new(buf: &'a mut [MaybeUninit<u8>]) -> MaybeUninitSlice<'a> {
         MaybeUninitSlice {
@@ -640,6 +710,7 @@ impl<'a> MaybeUninitSlice<'a> {
 }
 
 /// Returns the offset of the `sun_path` member of the passed unix socket address.
+#[cfg(not(target_os = "hermit"))]
 pub(crate) fn offset_of_path(storage: &libc::sockaddr_un) -> usize {
     let base = storage as *const _ as usize;
     let path = ptr::addr_of!(storage.sun_path) as usize;
@@ -647,6 +718,7 @@ pub(crate) fn offset_of_path(storage: &libc::sockaddr_un) -> usize {
 }
 
 #[allow(unsafe_op_in_unsafe_fn)]
+#[cfg(not(target_os = "hermit"))]
 pub(crate) fn unix_sockaddr(path: &Path) -> io::Result<SockAddr> {
     let mut storage = SockAddrStorage::zeroed();
     let len = {
@@ -692,39 +764,39 @@ pub(crate) fn unix_sockaddr(path: &Path) -> io::Result<SockAddr> {
 }
 
 // Used in `MsgHdr`.
-#[cfg(not(target_os = "redox"))]
+#[cfg(not(any(target_os = "redox", target_os = "hermit")))]
 pub(crate) use libc::msghdr;
 
-#[cfg(not(target_os = "redox"))]
+#[cfg(not(any(target_os = "redox", target_os = "hermit")))]
 pub(crate) fn set_msghdr_name(msg: &mut msghdr, name: &SockAddr) {
     msg.msg_name = name.as_ptr() as *mut _;
     msg.msg_namelen = name.len();
 }
 
-#[cfg(not(target_os = "redox"))]
+#[cfg(not(any(target_os = "redox", target_os = "hermit")))]
 #[allow(clippy::unnecessary_cast)] // IovLen type can be `usize`.
 pub(crate) fn set_msghdr_iov(msg: &mut msghdr, ptr: *mut libc::iovec, len: usize) {
     msg.msg_iov = ptr;
     msg.msg_iovlen = min(len, IovLen::MAX as usize) as IovLen;
 }
 
-#[cfg(not(target_os = "redox"))]
+#[cfg(not(any(target_os = "redox", target_os = "hermit")))]
 pub(crate) fn set_msghdr_control(msg: &mut msghdr, ptr: *mut libc::c_void, len: usize) {
     msg.msg_control = ptr;
     msg.msg_controllen = len as _;
 }
 
-#[cfg(not(target_os = "redox"))]
+#[cfg(not(any(target_os = "redox", target_os = "hermit")))]
 pub(crate) fn set_msghdr_flags(msg: &mut msghdr, flags: c_int) {
     msg.msg_flags = flags;
 }
 
-#[cfg(not(target_os = "redox"))]
+#[cfg(not(any(target_os = "redox", target_os = "hermit")))]
 pub(crate) fn msghdr_flags(msg: &msghdr) -> RecvFlags {
     RecvFlags(msg.msg_flags)
 }
 
-#[cfg(not(target_os = "redox"))]
+#[cfg(not(any(target_os = "redox", target_os = "hermit")))]
 pub(crate) fn msghdr_control_len(msg: &msghdr) -> usize {
     msg.msg_controllen as _
 }
@@ -766,6 +838,7 @@ impl SockAddr {
 
     /// Returns true if this address is an unnamed address from the `AF_UNIX` family (for local
     /// interprocess communication), false otherwise.
+    #[cfg(not(target_os = "hermit"))]
     pub fn is_unnamed(&self) -> bool {
         self.as_sockaddr_un()
             .map(|storage| {
@@ -782,6 +855,7 @@ impl SockAddr {
 
     /// Returns the underlying `sockaddr_un` object if this addres is from the `AF_UNIX` family,
     /// otherwise returns `None`.
+    #[cfg(not(target_os = "hermit"))]
     pub(crate) fn as_sockaddr_un(&self) -> Option<&libc::sockaddr_un> {
         self.is_unix().then(|| {
             // SAFETY: if unix socket, i.e. the `ss_family` field is `AF_UNIX` then storage must be
@@ -794,6 +868,7 @@ impl SockAddr {
     /// (for abstract names) null byte.
     ///
     /// Should not be called on unnamed addresses.
+    #[cfg(not(target_os = "hermit"))]
     fn path_len(&self, storage: &libc::sockaddr_un) -> usize {
         debug_assert!(!self.is_unnamed());
         self.len() as usize - offset_of_path(storage) - 1
@@ -802,6 +877,7 @@ impl SockAddr {
     /// Get a u8 slice for the bytes of the pathname or abstract name.
     ///
     /// Should not be called on unnamed addresses.
+    #[cfg(not(target_os = "hermit"))]
     fn path_bytes(&self, storage: &libc::sockaddr_un, abstract_name: bool) -> &[u8] {
         debug_assert!(!self.is_unnamed());
         // SAFETY: the pointed objects of type `i8` have the same memory layout as `u8`. The path is
@@ -821,6 +897,7 @@ impl SockAddr {
 
     /// Returns this address as Unix `SocketAddr` if it is an `AF_UNIX` pathname
     /// address, otherwise returns `None`.
+    #[cfg(not(target_os = "hermit"))]
     pub fn as_unix(&self) -> Option<std::os::unix::net::SocketAddr> {
         let path = self.as_pathname()?;
         // SAFETY: we can represent this as a valid pathname, then so can the
@@ -830,6 +907,7 @@ impl SockAddr {
 
     /// Returns this address as a `Path` reference if it is an `AF_UNIX`
     /// pathname address, otherwise returns `None`.
+    #[cfg(not(target_os = "hermit"))]
     pub fn as_pathname(&self) -> Option<&Path> {
         self.as_sockaddr_un().and_then(|storage| {
             (self.len() > offset_of_path(storage) as _ && storage.sun_path[0] != 0).then(|| {
@@ -955,6 +1033,7 @@ pub(crate) fn getpeername(fd: RawSocket) -> io::Result<SockAddr> {
         .map(|(_, addr)| addr)
 }
 
+#[cfg(not(target_os = "hermit"))]
 pub(crate) fn try_clone(fd: RawSocket) -> io::Result<RawSocket> {
     syscall!(fcntl(fd, libc::F_DUPFD_CLOEXEC, 0))
 }
@@ -993,6 +1072,7 @@ pub(crate) fn set_nonblocking(fd: RawSocket, nonblocking: bool) -> io::Result<()
     }
 }
 
+#[cfg(unix)]
 pub(crate) fn shutdown(fd: RawSocket, how: Shutdown) -> io::Result<()> {
     let how = match how {
         Shutdown::Write => libc::SHUT_WR,
@@ -1000,6 +1080,20 @@ pub(crate) fn shutdown(fd: RawSocket, how: Shutdown) -> io::Result<()> {
         Shutdown::Both => libc::SHUT_RDWR,
     };
     syscall!(shutdown(fd, how)).map(|_| ())
+}
+
+#[cfg(target_os = "hermit")]
+pub(crate) fn shutdown(fd: Socket, how: Shutdown) -> io::Result<()> {
+    let how = match how {
+        Shutdown::Write => libc::SHUT_WR,
+        Shutdown::Read => libc::SHUT_RD,
+        Shutdown::Both => libc::SHUT_RDWR,
+    };
+    unsafe {
+        libc::shutdown_socket(fd, how);
+    }
+
+    Ok(())
 }
 
 pub(crate) fn recv(fd: RawSocket, buf: &mut [MaybeUninit<u8>], flags: c_int) -> io::Result<usize> {
@@ -1042,7 +1136,7 @@ pub(crate) fn peek_sender(fd: RawSocket) -> io::Result<SockAddr> {
     Ok(sender)
 }
 
-#[cfg(not(target_os = "redox"))]
+#[cfg(not(any(target_os = "redox", target_os = "hermit")))]
 pub(crate) fn recv_vectored(
     fd: RawSocket,
     bufs: &mut [crate::MaybeUninitSlice<'_>],
@@ -1053,7 +1147,7 @@ pub(crate) fn recv_vectored(
     Ok((n, msg.flags()))
 }
 
-#[cfg(not(target_os = "redox"))]
+#[cfg(not(any(target_os = "redox", target_os = "hermit")))]
 pub(crate) fn recv_from_vectored(
     fd: RawSocket,
     bufs: &mut [crate::MaybeUninitSlice<'_>],
@@ -1075,7 +1169,7 @@ pub(crate) fn recv_from_vectored(
     Ok((n, msg.flags(), addr))
 }
 
-#[cfg(not(target_os = "redox"))]
+#[cfg(not(any(target_os = "redox", target_os = "hermit")))]
 pub(crate) fn recvmsg(
     fd: RawSocket,
     msg: &mut MsgHdrMut<'_, '_, '_>,
@@ -1094,7 +1188,7 @@ pub(crate) fn send(fd: RawSocket, buf: &[u8], flags: c_int) -> io::Result<usize>
     .map(|n| n as usize)
 }
 
-#[cfg(not(target_os = "redox"))]
+#[cfg(not(any(target_os = "redox", target_os = "hermit")))]
 pub(crate) fn send_vectored(
     fd: RawSocket,
     bufs: &[IoSlice<'_>],
@@ -1121,7 +1215,7 @@ pub(crate) fn send_to(
     .map(|n| n as usize)
 }
 
-#[cfg(not(target_os = "redox"))]
+#[cfg(not(any(target_os = "redox", target_os = "hermit")))]
 pub(crate) fn send_to_vectored(
     fd: RawSocket,
     bufs: &[IoSlice<'_>],
@@ -1132,7 +1226,7 @@ pub(crate) fn send_to_vectored(
     sendmsg(fd, &msg, flags)
 }
 
-#[cfg(not(target_os = "redox"))]
+#[cfg(not(any(target_os = "redox", target_os = "hermit")))]
 pub(crate) fn sendmsg(fd: RawSocket, msg: &MsgHdr<'_, '_, '_>, flags: c_int) -> io::Result<usize> {
     syscall!(sendmsg(fd, &msg.inner, flags)).map(|n| n as usize)
 }
@@ -1180,7 +1274,12 @@ fn into_timeval(duration: Option<Duration>) -> libc::timeval {
 
 #[cfg(all(
     feature = "all",
-    not(any(target_os = "haiku", target_os = "openbsd", target_os = "vita"))
+    not(any(
+        target_os = "haiku",
+        target_os = "openbsd",
+        target_os = "hermit",
+        target_os = "vita"
+    ))
 ))]
 pub(crate) fn tcp_keepalive_time(fd: RawSocket) -> io::Result<Duration> {
     unsafe {
@@ -1195,7 +1294,8 @@ pub(crate) fn set_tcp_keepalive(fd: RawSocket, keepalive: &TcpKeepalive) -> io::
         target_os = "haiku",
         target_os = "openbsd",
         target_os = "nto",
-        target_os = "vita"
+        target_os = "vita",
+        target_os = "hermit",
     )))]
     if let Some(time) = keepalive.time {
         let secs = into_secs(time);
@@ -1250,9 +1350,14 @@ fn into_secs(duration: Duration) -> c_int {
 }
 
 /// Get the flags using `cmd`.
-#[cfg(not(target_os = "vita"))]
+#[cfg(not(any(target_os = "vita", target_os = "hermit")))]
 fn fcntl_get(fd: RawSocket, cmd: c_int) -> io::Result<c_int> {
     syscall!(fcntl(fd, cmd))
+}
+
+#[cfg(target_os = "hermit")]
+fn fcntl_get(fd: Socket, cmd: c_int) -> io::Result<c_int> {
+    Ok(unsafe { libc::fcntl(fd, cmd, 0) })
 }
 
 /// Add `flag` to the current set flags of `F_GETFD`.
@@ -1352,6 +1457,7 @@ pub(crate) fn from_in6_addr(addr: in6_addr) -> Ipv6Addr {
     target_os = "espidf",
     target_os = "vita",
     target_os = "cygwin",
+    target_os = "hermit",
 )))]
 pub(crate) const fn to_mreqn(
     multiaddr: &Ipv4Addr,
@@ -1563,7 +1669,7 @@ impl crate::Socket {
     /// For more information about this option, see [`set_tcp_mss`].
     ///
     /// [`set_tcp_mss`]: crate::Socket::set_tcp_mss
-    #[cfg(all(feature = "all", not(target_os = "redox")))]
+    #[cfg(all(feature = "all", not(any(target_os = "redox", target_os = "hermit"))))]
     pub fn tcp_mss(&self) -> io::Result<u32> {
         unsafe {
             getsockopt::<c_int>(self.as_raw(), libc::IPPROTO_TCP, libc::TCP_MAXSEG)
@@ -1575,7 +1681,7 @@ impl crate::Socket {
     ///
     /// The `TCP_MAXSEG` option denotes the TCP Maximum Segment Size and is only
     /// available on TCP sockets.
-    #[cfg(all(feature = "all", not(target_os = "redox")))]
+    #[cfg(all(feature = "all", not(any(target_os = "redox", target_os = "hermit"))))]
     pub fn set_tcp_mss(&self, mss: u32) -> io::Result<()> {
         unsafe {
             setsockopt(
@@ -2124,7 +2230,7 @@ impl crate::Socket {
     /// [`set_reuse_port`]: crate::Socket::set_reuse_port
     #[cfg(all(
         feature = "all",
-        not(any(target_os = "solaris", target_os = "illumos", target_os = "cygwin"))
+        not(any(target_os = "solaris", target_os = "illumos", target_os = "cygwin", target_os = "hermit"))
     ))]
     pub fn reuse_port(&self) -> io::Result<bool> {
         unsafe {
@@ -2140,7 +2246,7 @@ impl crate::Socket {
     /// there's a socket already listening on this port.
     #[cfg(all(
         feature = "all",
-        not(any(target_os = "solaris", target_os = "illumos", target_os = "cygwin"))
+        not(any(target_os = "solaris", target_os = "illumos", target_os = "cygwin", target_os = "hermit"))
     ))]
     pub fn set_reuse_port(&self, reuse: bool) -> io::Result<()> {
         unsafe {
@@ -2956,17 +3062,17 @@ impl FromRawFd for crate::Socket {
     }
 }
 
-#[cfg(feature = "all")]
+#[cfg(all(feature = "all", not(target_os = "hermit")))]
 from!(UnixStream, crate::Socket);
-#[cfg(feature = "all")]
+#[cfg(all(feature = "all", not(target_os = "hermit")))]
 from!(UnixListener, crate::Socket);
-#[cfg(feature = "all")]
+#[cfg(all(feature = "all", not(target_os = "hermit")))]
 from!(UnixDatagram, crate::Socket);
-#[cfg(feature = "all")]
+#[cfg(all(feature = "all", not(target_os = "hermit")))]
 from!(crate::Socket, UnixStream);
-#[cfg(feature = "all")]
+#[cfg(all(feature = "all", not(target_os = "hermit")))]
 from!(crate::Socket, UnixListener);
-#[cfg(feature = "all")]
+#[cfg(all(feature = "all", not(target_os = "hermit")))]
 from!(crate::Socket, UnixDatagram);
 
 #[test]
