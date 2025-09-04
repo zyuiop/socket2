@@ -47,10 +47,7 @@ use std::num::NonZeroUsize;
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, IntoRawFd, OwnedFd, RawFd};
 #[cfg(target_os = "hermit")]
 use std::os::hermit::ffi::OsStrExt;
-#[cfg(target_os = "hermit")]
-use std::os::hermit::io::RawFd;
-#[cfg(target_os = "hermit")]
-use std::os::hermit::io::{AsFd, AsRawFd, BorrowedFd, FromRawFd, IntoRawFd, OwnedFd};
+#[cfg(not(target_os = "hermit"))]
 use std::os::unix::ffi::OsStrExt;
 #[cfg(all(feature = "all", not(target_os = "hermit")))]
 use std::os::unix::net::{UnixDatagram, UnixListener, UnixStream};
@@ -220,6 +217,7 @@ pub(crate) use libc::SO_PASSCRED;
     any(target_os = "linux", target_os = "android", target_os = "fuchsia")
 ))]
 pub(crate) use libc::SO_PRIORITY;
+#[cfg(not(target_os = "hermit"))]
 pub(crate) use libc::{
     ip_mreq as IpMreq, IPV6_MULTICAST_HOPS, IPV6_MULTICAST_IF, IPV6_MULTICAST_LOOP,
     IPV6_UNICAST_HOPS, IPV6_V6ONLY, IP_ADD_MEMBERSHIP, IP_DROP_MEMBERSHIP, IP_MULTICAST_IF,
@@ -1083,7 +1081,7 @@ pub(crate) fn shutdown(fd: RawSocket, how: Shutdown) -> io::Result<()> {
 }
 
 #[cfg(target_os = "hermit")]
-pub(crate) fn shutdown(fd: Socket, how: Shutdown) -> io::Result<()> {
+pub(crate) fn shutdown(fd: RawSocket, how: Shutdown) -> io::Result<()> {
     let how = match how {
         Shutdown::Write => libc::SHUT_WR,
         Shutdown::Read => libc::SHUT_RD,
@@ -1356,7 +1354,7 @@ fn fcntl_get(fd: RawSocket, cmd: c_int) -> io::Result<c_int> {
 }
 
 #[cfg(target_os = "hermit")]
-fn fcntl_get(fd: Socket, cmd: c_int) -> io::Result<c_int> {
+fn fcntl_get(fd: RawSocket, cmd: c_int) -> io::Result<c_int> {
     Ok(unsafe { libc::fcntl(fd, cmd, 0) })
 }
 
